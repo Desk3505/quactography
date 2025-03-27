@@ -1,11 +1,13 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
 import argparse
+from pathlib import Path
+import numpy as np
 
 from quactography.graph.undirected_graph import Graph
 from quactography.adj_matrix.io import load_graph
 from quactography.hamiltonian.hamiltonian_qubit_edge import Hamiltonian_qubit_edge
-from quactography.solver.qaoa_solver_qu_edge import multiprocess_qaoa_solver_edge
+from quactography.solver.qaoa_solver_qu_edge import find_max_cost, multiprocess_qaoa_solver_edge
 
 
 """
@@ -29,6 +31,10 @@ def _build_arg_parser():
                    help="Ending node of the graph", type=int)
     p.add_argument("output_file",
                    help="Output file name (npz file)", type=str)
+    p.add_argument("output_directory",
+                    help="Directory where the files will be outputed", type=str,
+                    default="data/output_graphs/"
+    )
     p.add_argument(
         "--alphas",
         nargs="+",
@@ -38,14 +44,15 @@ def _build_arg_parser():
     )
     p.add_argument(
         "--reps",
-        help="Number of repetitions for the QAOA algorithm",
+        nargs="+",
         type=int,
-        default=1,
+        help="List of repetitions to run for the QAOA algorithm",
+        default=[1],
     )
     p.add_argument(
         "-npr",
         "--number_processors",
-        help="number of cpu to use for multiprocessing",
+        help="Number of cpu to use for multiprocessing",
         default=1,
         type=int,
     )
@@ -75,25 +82,81 @@ def main():
     args = parser.parse_args()
 
     weighted_graph, _, _ = load_graph(args.in_graph)
-    graph = Graph(weighted_graph, args.starting_node, args.ending_node)
+    degree = np.count_nonzero(weighted_graph[args.starting_node] != 0)
+    graphs = []
+    
+    if degree <= 3:
+        graphs.append(Graph(weighted_graph, args.starting_node, args.ending_node))
+    else:
+        j = degree%3
+        k = np.floor(degree/3)
+        for m in range(int(k)):
+            l = 0
+            xi = 0
+            x = 0
+            tmp_copy = weighted_graph.copy()
+            while xi < len(weighted_graph[args.starting_node])-1:
+                while l < 3*m:
+                    if tmp_copy[args.starting_node][xi] != 0:
+                        tmp_copy[args.starting_node][xi] = 0
+                        tmp_copy[xi][args.starting_node] = 0
+                        l += 1
+                    xi += 1
+                while x < 3:
+                    if tmp_copy[args.starting_node][xi] != 0:
+                        x += 1
+                    xi += 1
+                tmp_copy[args.starting_node][xi] = 0
+                tmp_copy[xi][args.starting_node] = 0
+                xi += 1
+            graphs.append(Graph(tmp_copy, args.starting_node, args.ending_node))
+        
+        for i in range(len(weighted_graph[args.starting_node])-1,0,-1):
+            while j > 0:
+                if weighted_graph[args.starting_node][i] != 0:
+                    j -= 1
+            weighted_graph[args.starting_node][i] = 0 
+            weighted_graph[i][args.starting_node] = 0   
+        graphs.append(Graph(weighted_graph, args.starting_node, args.ending_node))
+            
 
     # Construct Hamiltonian when qubits are set as edges,
     # then optimize with QAOA/scipy:
+    hamiltonians = []
+    output_files = []
+    hcount = 0
+    for g in graphs:
+        hamiltonians.append([Hamiltonian_qubit_edge(g, alpha, hcount) for alpha in args.alphas])
+        output_files.append("_" + str(hcount)+ "_" + args.output_file)
+        hcount += 1
+    # weighted_graph, _, _ = load_graph(args.in_graph)
+    # graph = Graph(weighted_graph, args.starting_node, args.ending_node)
 
-    hamiltonians = [Hamiltonian_qubit_edge(graph, alpha) for alpha in args.alphas]
+    # # Construct Hamiltonian when qubits are set as edges,
+    # # then optimize with QAOA/scipy:
+
+    # hamiltonians = [Hamiltonian_qubit_edge(graph, alpha,alpha) for alpha in args.alphas]
 
     # print(hamiltonians[0].total_hamiltonian.simplify())
 
     print("\n Calculating qubits as edges......................")
-    multiprocess_qaoa_solver_edge(
-        hamiltonians,
-        args.reps,
-        args.number_processors,
-        args.output_file,
-        args.optimizer,
-        args.plt_cost_landscape,
-        args.save_only,
-    )
+    for i in range(len(args.reps)):
+        hcount = 0 
+        for hamiltonian in hamiltonians:
+            multiprocess_qaoa_solver_edge(
+                hamiltonian,
+                args.reps[i],
+                args.number_processors,
+                args.output_file,
+                args.output_directory,
+                args.optimizer,
+                args.plt_cost_landscape,
+                args.save_only,
+                )
+            hcount += 1
+        for a in args.alphas:
+            find_max_cost(args.output_directory, a, i+1)
+
 
 
 if __name__ == "__main__":
