@@ -1,13 +1,17 @@
-from qiskit.quantum_info import SparsePauliOp
+from qiskit import QuantumCircuit
+from qiskit.quantum_info import SparsePauliOp,Operator   
+from qiskit.circuit.library import PauliEvolutionGate
 import numpy as np
 
-# Definition of a Hamiltonian class which will contain all informations about the global quantum cost function:
+# Definition of a Hamiltonian class which will contain all informations about
+# the global quantum cost function:
 
 
 class Hamiltonian_qubit_edge:
-    """Creates the Hamiltonian with qubits considered to be edges with the given graph and alpha value"""
+    """Creates the Hamiltonian with qubits considered to be edges with 
+    the given graph and alpha value"""
 
-    def __init__(self, graph, alpha):
+    def __init__(self, graph, alpha,name):
         self.graph = graph
         self.mandatory_c = self.mandatory_cost()
         self.starting_node_c = self.starting_node_cost()
@@ -18,6 +22,8 @@ class Hamiltonian_qubit_edge:
         self.alpha_d = 8 * self.alpha
         self.alpha_f = 8 * self.alpha
         self.alpha_i = self.alpha
+        self.name = name
+        self.alphai = alpha
         self.total_hamiltonian = (
             -self.mandatory_c
             + self.alpha_d * (self.starting_node_c) ** 2
@@ -38,7 +44,8 @@ class Hamiltonian_qubit_edge:
     self : Hamiltonian_qubit_edge object
     Returns
     -------
-    SparsePauliOp: Pauli string representing the cost associated with the sum of the weights
+    SparsePauliOp: Pauli string representing the cost associated
+    with the sum of the weights
       of the edges taken without penalty.
     """
 
@@ -60,39 +67,57 @@ class Hamiltonian_qubit_edge:
 
     def starting_node_cost(self):
         """
-        Cost term of having a single starting node connection (one edge connected to the starting node)
+        Cost term of having a single starting node connection
+        (one edge connected to the starting node)
 
         Parameters
         ----------
         self : Hamiltonian_qubit_edge object
         Returns
         -------
-        SparsePauliOp: Pauli string representing the cost associated 
+        SparsePauliOp: Pauli string representing the cost associated
         with the constraint of having a single starting node connection """
 
-        starting_qubit = []
-        for node, value in enumerate(self.graph.starting_nodes):
-            if value == self.graph.starting_node:
-                starting_qubit.append(self.graph.edge_indices[node])
-        for node, value in enumerate(self.graph.ending_nodes):
-            if value == self.graph.starting_node:
-                starting_qubit.append(self.graph.edge_indices[node])
-        # print(f"\n Qubit to sum over starting x_i: q({starting_qubit}) - I ")
+        starters = np.where(np.array(self.graph.starting_nodes) == self.graph.starting_node)[0]
+        if len(starters) == 3:
+            qc = QuantumCircuit(self.graph.number_of_edges)
+            qc.h(starters[0])
+            qc.h(starters[1])
+            qc.x(starters[2])
+            qc.ccx(starters[0], starters[1], starters[2])
+            qc.ccx(starters[0], starters[2], starters[1])
+            qc.x(starters[0])
+            qc.x(starters[1])
+            qc.ccx(starters[1], starters[2], starters[0])
+            qc.x(starters[2]) 
+            print(Operator.from_circuit(qc)) 
+            start_node_constraint_cost_h = PauliEvolutionGate(SparsePauliOp.from_operator(Operator.from_circuit(qc)))
+            print(start_node_constraint_cost_h.decompose().draw())
+        else :   
+            starting_qubit = []
+                
+            for node, value in enumerate(self.graph.starting_nodes):
+                if value == self.graph.starting_node:
+                    starting_qubit.append(self.graph.edge_indices[node])
+            for node, value in enumerate(self.graph.ending_nodes):
+                if value == self.graph.starting_node:
+                    starting_qubit.append(self.graph.edge_indices[node])
+            # print(f"\n Qubit to sum over starting x_i: q({starting_qubit}) - I ")
 
-        pauli_starting_node_term = [
-            ("I" * self.graph.number_of_edges, len(starting_qubit) * 0.5 - 1)
-        ]
+            pauli_starting_node_term = [
+                ("I" * self.graph.number_of_edges, len(starting_qubit) * 0.5 - 1)
+            ]
 
-        # Z à la bonne position:
-        for _, value in enumerate(starting_qubit):
-            str2 = (
-                "I" * (self.graph.number_of_edges - (value + 1)) + "Z" + "I" * value,
-                -0.5,
-            )
-            pauli_starting_node_term.append(str2)
-        start_node_constraint_cost_h = SparsePauliOp.from_list(pauli_starting_node_term)
+            # Z à la bonne position:
+            for _, value in enumerate(starting_qubit):
+                str2 = (
+                    "I" * (self.graph.number_of_edges - (value + 1)) + "Z" + "I" * value,
+                    -0.5,
+                )
+                pauli_starting_node_term.append(str2)
+            start_node_constraint_cost_h = SparsePauliOp.from_list(pauli_starting_node_term)
 
-        # print(f"\n Start constraint = {start_node_constraint_cost_h}")
+            # print(f"\n Start constraint = {start_node_constraint_cost_h}")
         return start_node_constraint_cost_h
 
     def ending_node_cost(self):
@@ -104,7 +129,7 @@ class Hamiltonian_qubit_edge:
         self : Hamiltonian_qubit_edge object
         Returns
         -------
-        SparsePauliOp: Pauli string representing the cost associated with 
+        SparsePauliOp: Pauli string representing the cost associated with
         the constraint of having a single ending node connection"""
         qubit_end = []
         for node, value in enumerate(self.graph.ending_nodes):
@@ -131,15 +156,15 @@ class Hamiltonian_qubit_edge:
 
     def intermediate_node_cost(self):
         """
-        Cost term of having a  pair number of connections to each intermediate node 
-        (one edge connected to each intermediate node) 
+        Cost term of having a  pair number of connections to each intermediate node
+        (one edge connected to each intermediate node)
 
         Parameters
         ----------
         self : Hamiltonian_qubit_edge object
         Returns
         -------
-        SparsePauliOp: Pauli string representing the cost associated with the constraint 
+        SparsePauliOp: Pauli string representing the cost associated with the constraint
         of having pair number of connections to each intermediate node"""
         # Intermediate connections, constraints:
         int_nodes = []
@@ -167,16 +192,12 @@ class Hamiltonian_qubit_edge:
                 if value == int_nodes[i]:
                     liste_qubits_int[i].append(self.graph.edge_indices[node])
 
-        for i in range(len(liste_qubits_int)):
-            a = liste_qubits_int[i]
-            # print(f"Multiply qubits on intermediate x_i: q({a}) ")
-
         intermediate_cost_h_term = []
         prod_terms = []
         for list_q in liste_qubits_int:
             prod_term = "I" * self.graph.number_of_edges
             for qubit in list_q:
-                prod_term = prod_term[:qubit] + "Z" + prod_term[qubit + 1 :]
+                prod_term = prod_term[:qubit] + "Z" + prod_term[qubit + 1:]
             prod_terms.append(prod_term[::-1])
 
         for i in range(len(liste_qubits_int)):
@@ -196,7 +217,7 @@ class Hamiltonian_qubit_edge:
 
     def intermediate_min_edge_cost(self):
         """
-        Cost term of penalizing the number of edges connected to each intermediate node 
+        Cost term of penalizing the number of edges connected to each intermediate node
         (one edge connected to each intermediate node) to avoid loops
 
         Parameters
@@ -226,9 +247,6 @@ class Hamiltonian_qubit_edge:
                 if value == int_nodes[i]:
                     liste_qubits_int.append(self.graph.edge_indices[node])
 
-        a = liste_qubits_int
-        # print(f"Edges present and connected to each int node: q({a}) ")
-
         pauli_int_edge_term = [("I" * self.graph.number_of_edges, len(int_nodes) * 0.5)]
 
         # Z at the right place:
@@ -250,11 +268,11 @@ class Hamiltonian_qubit_edge:
 
         Parameters
         ----------
-        self : Hamiltonian_qubit_edge object    
+        self : Hamiltonian_qubit_edge object  
         Returns
         -------
         eigenvalues: list of float
-            Eigenvalues of the Hamiltonian, cost of the paths 
+            Eigenvalues of the Hamiltonian, cost of the paths
         binary_paths: list of binary strings
         Binary paths corresponding to the eigenvectors of the Hamiltonian"""
         mat_hamiltonian = np.array(self.total_hamiltonian.to_matrix())
