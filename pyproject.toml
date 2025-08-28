@@ -1,3 +1,23 @@
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "quactography"
+version = "0.1"
+description = "Quactography : quantum tracking"
+authors = [{ name = "SCIL Team" }]
+readme = "README.md"
+requires-python = ">=3.10, <3.13"
+license-files = ["LICENSE"]
+dynamic = ["dependencies", "scripts"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Topic :: Scientific/Engineering"
+]
+
+

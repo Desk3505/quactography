@@ -1,5 +1,9 @@
 import nibabel as nib
 import numpy as np
+from scipy.sparse.csgraph import dijkstra
+import matplotlib.pyplot as plt
+import networkx as nx
+
 
 from quactography.adj_matrix.reconst import (
                     build_adjacency_matrix,
@@ -17,7 +21,8 @@ from quactography.hamiltonian.hamiltonian_qubit_edge import Hamiltonian_qubit_ed
 from quactography.solver.qaoa_solver_qu_edge import multiprocess_qaoa_solver_edge_rap
 from quactography.solver.Dijkstra import dijkstra_stepwise
 
-def quack_rap(in_nodes_mask_img, in_sh_img, start_point, reps, alpha,
+
+def quack_rap(rap_mask_img, rap_sh_img, start_point, reps, alpha,
          keep_mask=None, threshold=0.2, slice_index=None,
          axis_name="axial", sh_order=8, prev_direction=[0,0,0], theta=45):
     """Build adjacency matrix from diffusion data (white matter mask and fodf peaks).
@@ -56,19 +61,17 @@ def quack_rap(in_nodes_mask_img, in_sh_img, start_point, reps, alpha,
     #nodes_mask_im = nib.load(in_nodes_mask)
     #sh_im = nib.load(in_sh)
 
-    nodes_mask = in_nodes_mask_img.get_fdata().astype(bool)
-
+    nodes_mask = rap_mask_img.get_fdata().astype(bool)
+    sh = rap_sh_img.get_fdata()
 
     keep_node_indices = None
     if keep_mask:
         keep_mask = nib.load(keep_mask).get_fdata().astype(bool)
         keep_node_indices = np.flatnonzero(keep_mask)
-
-    sh = in_sh_img.get_fdata()
-    
+ 
     # adjacency graph
     adj_matrix, node_indices, labes = build_adjacency_matrix(nodes_mask)
-    
+
     # assign edge weights
     weighted_graph, node_indices = build_weighted_graph(
         adj_matrix, node_indices, sh, sh_order
@@ -77,47 +80,52 @@ def quack_rap(in_nodes_mask_img, in_sh_img, start_point, reps, alpha,
     # filter graph edges by weight
     weighted_graph[weighted_graph < threshold] = 0.0
 
-    # remove intermediate nodes that connect only two nodes
-    weighted_graph = remove_intermediate_connections(
-        weighted_graph, node_indices, keep_node_indices
-    )
+    
+    # # remove intermediate nodes that connect only two nodes
+    # weighted_graph = remove_intermediate_connections(
+    #     weighted_graph, node_indices, keep_node_indices
+    # )
 
-    # remove nodes without edges
-    weighted_graph, node_indices = remove_orphan_nodes(
-        weighted_graph, node_indices, keep_node_indices
-    )
+    # # remove nodes without edges
+    # weighted_graph, node_indices = remove_orphan_nodes(
+    #     weighted_graph, node_indices, keep_node_indices
+    # )
+
     if slice_index is not None:
         weighted_graph, node_indices = extract_slice_at_index(
             weighted_graph, node_indices, nodes_mask.shape, slice_index, axis_name
         )
     
     # Get end points of the streamline
-
+    end_pointX = np.array([[30,17,2]])
     end_points = get_output_nodes(
         nodes_mask,
         entry_node=start_point,
         propagation_direction=prev_direction,
         angle_rad=theta
     )
-    # Add end point edges to the adjacency matrix
-    weighted_graph = add_end_point_edge(weighted_graph, end_points, labels=labes)
-    end = np.flatnonzero(weighted_graph)
+    # Add a node that connects to all end points with neutral weight in order to know where to get out the region
+    weighted_graph = add_end_point_edge(weighted_graph, end_pointX, labels=labes)
+    end = weighted_graph.shape[0]-1
 
     #function to process the graph before quantum path finding 
     line = rap_funct(
         weighted_graph,
         starting_node = labes[start_point[0], start_point[1], start_point[2]],
-        ending_node = end[-1],
+        ending_node = end,
         alphas = [alpha],
         reps = reps,
     )
+
+    # reconstruct the streamline coordinates from the node indices
     line.pop()
-    sline = np.unravel_index(line, labes.shape)
     llist = []
-    for i in range(len(sline[0])):
-        llist.append([sline[0][i], sline[1][i], sline[2][i]])
-    sline = llist
-    return sline, prev_direction, True
+    for i in line:
+        sline = np.unravel_index(node_indices[i],labes.shape)
+        llist.append(np.array(sline))
+    llist.append(np.add(llist[-1], prev_direction))
+
+    return llist, prev_direction, True
 
 def rap_funct(weighted_graph, starting_node, ending_node, alphas,
                 reps, number_processors=2, optimizer="Differential"):
@@ -147,6 +155,8 @@ def rap_funct(weighted_graph, starting_node, ending_node, alphas,
     line : list
         List of coordinates for the streamline.
     """
+
+    #---------------QUTANTUM GRAPH SOLVER (QAOA)-----------------
     # graph = Graph(weighted_graph, starting_node, ending_node)
     # if graph.number_of_edges > 17: 
     #        raise Exception("RAPGraph: max number of points exceeded")
@@ -170,8 +180,9 @@ def rap_funct(weighted_graph, starting_node, ending_node, alphas,
     #     optimizer
     #     )
     
+    #---------------CLASSIC DIJKSTRA SOLVER-----------------
     line = dijkstra_stepwise(
-        weighted_graph,
+        -weighted_graph,
         starting_node,
         ending_node
     )

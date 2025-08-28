@@ -2,7 +2,7 @@ import heapq
 import networkx as nx
 
 
-def dijkstra_stepwise(Graph, start, target, diagonal_mode="nondiagonal"):
+def dijkstra_stepwise(Graph, start, target):
     """
     Perform Dijkstra's algorithm in a stepwise manner on a given graph.
     Parameters
@@ -61,8 +61,7 @@ def dijkstra_stepwise(Graph, start, target, diagonal_mode="nondiagonal"):
         if current_node == target:
             break
 
-        else:
-            neighbors = list(G.neighbors(current_node))
+        neighbors = list(G.neighbors(current_node))
 
         for neighbor in neighbors:
             if neighbor not in evaluated_nodes:

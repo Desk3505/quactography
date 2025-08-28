@@ -167,12 +167,10 @@ def add_end_point_edge(adj_matrix, end, labels):
     np.ndarray
         Updated adjacency matrix with end point edges added.
     """
-    #labels = np.unravel_index(node_indes, adj_matrix.shape)
-    #new_shape = (adj_matrix.shape[0] + 1, adj_matrix.shape[1] + 1)
-    adj_matrix = np.lib.pad(adj_matrix, (0, 1), 'constant', constant_values=(0))
 
+    adj_matrix = np.lib.pad(adj_matrix, (0, 1), 'constant', constant_values=(0))
     for i in end:
-        start = labels[i[0], i[1], i[2]] -1
+        start = labels[i[0], i[1], i[2]]
         adj_matrix[start, -1] = 1
         adj_matrix[-1, start] = 1  # Assuming undirected graph
     return adj_matrix

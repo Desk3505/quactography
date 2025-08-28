@@ -280,3 +280,116 @@ def multiprocess_qaoa_solver_edge(
     print(
         "------------------MULTIPROCESS SOLVER FINISHED-------------------------"
     )
+
+
+
+def multiprocess_qaoa_solver_edge_rap(
+    hamiltonians,
+    reps,
+    nbr_processes,
+    optimizer
+):
+    """
+    Solve the optimization problem using the QAOA algorithm
+    with multiprocessing on the alpha values.
+
+    Parameters
+    ----------
+    hamiltonians : list
+        List of Hamiltonian objects from quactography library, Hamiltonian_qubit_edge.
+    batch_count : int
+        Number of time the command will be ran
+    reps : int
+        Number of repetitions for the QAOA algorithm,
+        determines the number of sets of gamma and beta angles.
+    nbr_processes : int
+        Number of cpu to use for multiprocessing. default=1
+    output_file : str
+        The output file name for the optimization results in .npz format.
+    optimizer : str
+        Optimizer to use for the QAOA algorithm. default="Differential"
+    cost_landscape : bool
+        Plot the cost landscape with the optimal point if reps=1. default=False
+    save_only : bool
+        If True, the figure is saved without displaying it. default=False
+
+    Returns
+    -------
+    None
+    """
+    pool = multiprocessing.Pool(nbr_processes)
+    pool.map(
+        find_longest_path,
+        zip(
+            hamiltonians,
+            itertools.repeat(reps),
+            itertools.repeat(optimizer),
+        ),
+    )
+    print(
+        "------------------MULTIPROCESS SOLVER FINISHED-------------------------"
+    )
+
+def find_longest_path_rap(args):
+    """
+    Find the longest path in a graph using the QAOA algorithm,
+    with a plot of the cost landscape if reps=1 and
+    the optimal point if cost_landscape=True.
+    Parameters
+    ----------
+    args : tuple
+        Tuple containing the Hamiltonian object from quactography library,
+        Hamiltonian_qubit_edge, the number of repetitions for the QAOA algorithm,
+        the output file name for the optimization results in .npz format, the optimizer
+        to use for the QAOA algorithm, a boolean to plot the cost landscape with
+        the optimal point if reps=1, and a boolean to save the figure
+        without displaying it.
+    Returns
+    -------
+    None
+    """
+    h = args[0]
+    reps = args[1]
+    optimizer = args[2]
+    mixerf = mixer(h)
+    # Create QAOA circuit.
+    ansatz = QAOAAnsatz(h.total_hamiltonian, reps, mixer_operator=mixerf, name="QAOA", flatten=True)
+    # Plot the circuit layout:
+    # ansatz.decompose(reps=3).draw()
+    # ----------------------------------------------------------------RUN LOCALLY: -----
+    # Run on local estimator and sampler:
+    # Save output file name diffrerent for each alpha and loop:
+    estimator = Estimator(options={"shots": 1000000, "seed": 43})
+    sampler = Sampler(options={"shots": 1000000, "seed": 43})
+    # -----------------------------------------------------------------------------------
+    if optimizer == "Differential":
+        # Reference: https://www.youtube.com/watch?v=o-OPrQmS1pU
+        # Define fixed arguments
+        cost_func_with_args = partial(
+            cost_func,
+            estimator=estimator,
+            ansatz=ansatz,
+            hamiltonian=h.total_hamiltonian,
+        )
+        # Call differential evolution with the modified cost function
+        bounds = [[0, 2 * np.pi], [0, np.pi]] * reps
+        res = differential_evolution(cost_func_with_args, bounds, disp=False)
+        resx = res.x
+
+    # -----------------------------------------------------
+    circ = ansatz.copy()
+    circ.measure_all()
+
+    dist = sampler.run(circ, resx).result().quasi_dists[0]  # type: ignore
+    bin_str = list(map(int, max(dist.binary_probabilities(),
+    key=dist.binary_probabilities().get)))  # type: ignore
+
+    bin_str_reversed = bin_str[::-1]
+    bin_str_reversed = np.array(bin_str_reversed)  # type: ignore
+
+    # Concatenate the binary path to a string:
+    str_path_reversed = ["".join(map(str, bin_str_reversed))]  # type: ignore
+    str_path_reversed = str_path_reversed[0]  # type: ignore
+    # Save parameters alpha and min_cost with path in csv file:
+    opt_path = str_path_reversed
+    return opt_path
